@@ -565,7 +565,7 @@ bool AbstractMetaBuilder::build()
         cls->addDefaultConstructor();
     }
 
-    if (cls->isAbstract() && !cls->isInterface()) {
+    if (cls->typeEntry() && cls->isAbstract() && !cls->isInterface()) {
       cls->typeEntry()->setLookupName(cls->typeEntry()->targetLangName() + "$ConcreteWrapper");
     }
   }
@@ -1101,22 +1101,17 @@ void AbstractMetaBuilder::traverseFunctions(ScopeModelItem scope_item, AbstractM
         *meta_function += AbstractMetaAttributes::Static;
 
       if (QPropertySpec* read = meta_class->propertySpecForRead(meta_function->name())) {
-        if (read->type() == meta_function->type()->typeEntry()) {
+        if (meta_function->type() && read->type() == meta_function->type()->typeEntry()) {
           *meta_function += AbstractMetaAttributes::PropertyReader;
           meta_function->setPropertySpec(read);
-          //                     printf("%s is reader for %s\n",
-          //                            qPrintable(meta_function->name()),
-          //                            qPrintable(read->name()));
         }
       } else if (QPropertySpec* write = meta_class->propertySpecForWrite(meta_function->name())) {
         if (meta_function->arguments().size() == 1
+            && meta_function->arguments().at(0)->type()
             && write->type() == meta_function->arguments().at(0)->type()->typeEntry())
         {
           *meta_function += AbstractMetaAttributes::PropertyWriter;
           meta_function->setPropertySpec(write);
-          //                     printf("%s is writer for %s\n",
-          //                            qPrintable(meta_function->name()),
-          //                            qPrintable(write->name()));
         }
       } else if (QPropertySpec* reset = meta_class->propertySpecForReset(meta_function->name())) {
         *meta_function += AbstractMetaAttributes::PropertyResetter;
@@ -1130,10 +1125,11 @@ void AbstractMetaBuilder::traverseFunctions(ScopeModelItem scope_item, AbstractM
       bool isInvalidConstructor =
         meta_function->isConstructor() && (meta_function->isPrivate() || meta_function->isInvalid());
       if (isInvalidConstructor && meta_function->arguments().size() == 1
+          && meta_function->arguments().at(0)->type()
+          && meta_function->arguments().at(0)->type()->typeEntry()
           && meta_class->qualifiedCppName()
                == meta_function->arguments().at(0)->type()->typeEntry()->qualifiedCppName())
       {
-        // deleted or private copy constructor, it seems copying is not allowed
         meta_class->typeEntry()->setNoCopy(true);
       }
       if ((isInvalidDestructor || isInvalidConstructor) && !meta_class->hasNonPrivateConstructor()) {
@@ -1201,6 +1197,7 @@ void AbstractMetaBuilder::removeEquivalentFunctions(AbstractMetaClass* parent)
     AbstractMetaArgumentList args = fun->arguments();
     bool candidateToRemove = false;
     for (AbstractMetaArgument* arg : args) {
+      if (!arg->type()) continue;
       const TypeEntry* argType = arg->type()->typeEntry();
       if (argType && argType->equivalentType()) {
         candidateToRemove = true;
@@ -1210,7 +1207,6 @@ void AbstractMetaBuilder::removeEquivalentFunctions(AbstractMetaClass* parent)
     if (!candidateToRemove) {
       continue;
     }
-    // check if there are other functions with the same name and equivalent parameters
     AbstractMetaFunctionList overloadedFunctions = parent->queryFunctionsByName(fun->name());
     for (AbstractMetaFunction* overload : overloadedFunctions) {
       if (overload != fun) {
@@ -1218,9 +1214,12 @@ void AbstractMetaBuilder::removeEquivalentFunctions(AbstractMetaClass* parent)
         if (overloadArgs.size() == args.size()) {
           bool equivalentArgs = true;
           for (int i = 0; i < args.size() && equivalentArgs; i++) {
+            if (!args[i]->type() || !overloadArgs[i]->type()) {
+              equivalentArgs = false;
+              continue;
+            }
             const TypeEntry* argType = args[i]->type()->typeEntry();
             const TypeEntry* overloadArgType = overloadArgs[i]->type()->typeEntry();
-            // This could have some more equivalency checks, but currently this seems to be sufficient
             equivalentArgs = (argType && overloadArgType
                               && (argType == overloadArgType || argType->equivalentType() == overloadArgType));
           }
@@ -2096,7 +2095,7 @@ void AbstractMetaBuilder::parseQ_Property(AbstractMetaClass* meta_class, const Q
   for (int i = 0; i < declarations.size(); ++i) {
     QString p = declarations.at(i);
 
-    QStringList l = p.split(QLatin1String(" "));
+    QStringList l = p.split(QLatin1String(" "), Qt::SkipEmptyParts);
 
     QStringList qualifiedScopeName = currentScope()->qualifiedName();
     bool ok = false;
@@ -2105,9 +2104,15 @@ void AbstractMetaBuilder::parseQ_Property(AbstractMetaClass* meta_class, const Q
     QString typeName = l.value(pIndex++);
     bool isConst = false;
     if (typeName == "const") {
-      // use the next part as the type name
       typeName = l.value(pIndex++);
       isConst = true;
+    }
+    // The simplecpp preprocessor may insert spaces around "::" in scoped
+    // type names (e.g. "QtSvg :: Options" instead of "QtSvg::Options").
+    // Rejoin them so the type name is correctly resolved.
+    while (pIndex < l.size() && l.value(pIndex) == QLatin1String("::")) {
+      pIndex++; // skip "::"
+      typeName += QLatin1String("::") + l.value(pIndex++);
     }
     QString propertyName = l.value(pIndex++);
     QString modifiers;
@@ -2311,7 +2316,9 @@ void AbstractMetaBuilder::setupClonable(AbstractMetaClass* cls)
     if ((f->name() == op_assign || f->isConstructor()) && f->isPublic()) {
       AbstractMetaArgumentList arguments = f->arguments();
       if (arguments.size() == 1) {
-        if (cls->typeEntry()->qualifiedCppName() == arguments.at(0)->type()->typeEntry()->qualifiedCppName()) {
+        auto argType = arguments.at(0)->type();
+        if (argType && argType->typeEntry()
+            && cls->typeEntry()->qualifiedCppName() == argType->typeEntry()->qualifiedCppName()) {
           if (cls->typeEntry()->isValue()) {
             cls->setHasCloneOperator(true);
             return;

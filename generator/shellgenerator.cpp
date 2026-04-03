@@ -49,6 +49,8 @@
 
 bool ShellGenerator::shouldGenerate(const AbstractMetaClass* meta_class) const
 {
+  if (!meta_class->typeEntry())
+    return false;
   uint cg = meta_class->typeEntry()->codeGeneration();
   return ((cg & TypeEntry::GenerateCode) != 0);
 }
