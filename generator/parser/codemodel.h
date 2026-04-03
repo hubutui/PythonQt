@@ -139,7 +139,7 @@ struct TypeInfo {
   QString toString(bool parsable = false) const;
 
   static TypeInfo combine(const TypeInfo& __lhs, const TypeInfo& __rhs);
-  static TypeInfo resolveType(TypeInfo const& __type, CodeModelItem __scope);
+  static TypeInfo resolveType(TypeInfo const& __type, CodeModelItem __scope, int maxDepth = 100);
 
 private:
   struct TypeInfo_flags {

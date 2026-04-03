@@ -139,25 +139,23 @@ TypeInfo TypeInfo::combine(const TypeInfo& __lhs, const TypeInfo& __rhs)
   return __result;
 }
 
-TypeInfo TypeInfo::resolveType(TypeInfo const& __type, CodeModelItem __scope)
+TypeInfo TypeInfo::resolveType(TypeInfo const& __type, CodeModelItem __scope, int maxDepth)
 {
+  if (maxDepth <= 0)
+    return __type;
+
   CodeModel* __model = __scope->model();
   Q_ASSERT(__model != 0);
 
   CodeModelItem __item = __model->findItem(__type.qualifiedName(), __scope);
 
-  // Copy the type and replace with the proper qualified name. This
-  // only makes sence to do if we're actually getting a resolved
-  // type with a namespace. We only get this if the returned type
-  // has more than 2 entries in the qualified name... This test
-  // could be improved by returning if the type was found or not.
   TypeInfo otherType(__type);
   if (__item && __item->qualifiedName().size() > 1) {
     otherType.setQualifiedName(__item->qualifiedName());
   }
 
   if (TypeAliasModelItem __alias = __item.dynamicCast<_TypeAliasModelItem>())
-    return resolveType(TypeInfo::combine(__alias->type(), otherType), __scope);
+    return resolveType(TypeInfo::combine(__alias->type(), otherType), __scope, maxDepth - 1);
 
   return otherType;
 }
